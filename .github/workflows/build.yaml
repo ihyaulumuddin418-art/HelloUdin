@@ -1,0 +1,71 @@
+name: Build APK Simple
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: 'Nama Aplikasi'
+        required: true
+        default: 'HelloUdin'
+      package_name:
+        description: 'Package Name (contoh: com.udin.hello)'
+        required: true
+        default: 'com.udin.hello'
+      files_base64:
+        description: 'JSON Base64 (index.html)'
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Extract Web Assets
+        env:
+          FILES_DATA: ${{ github.event.inputs.files_base64 }}
+        run: |
+          mkdir -p www
+          echo "$FILES_DATA" | base64 -d > files.json
+          node -e "
+            const fs = require('fs');
+            const files = JSON.parse(fs.readFileSync('files.json'));
+            files.forEach(f => {
+              const path = require('path');
+              const fullPath = path.join('www', f.path);
+              fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+              fs.writeFileSync(fullPath, Buffer.from(f.content, 'base64'));
+            });
+          "
+
+      - name: Initialize Capacitor
+        run: |
+          npm init -y
+          npm install @capacitor/core @capacitor/android @capacitor/cli
+          npx cap init "${{ github.event.inputs.app_name }}" "${{ github.event.inputs.package_name }}" --web-dir www
+          npx cap add android
+          npx cap sync
+
+      - name: Build APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload Result
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.app_name }}-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          
